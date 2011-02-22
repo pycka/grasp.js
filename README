@@ -1,0 +1,22 @@
+ Grasp.js
+ 
+ -- Yet Another JavaScript CSS Selector Enigine --
+
+                                 by Radosław Pycka
+ 
+
+Uses basic DOM traversing methods (unoptimized, yet), seriously unready for production - use great Sizzle instead ;-)
+Written by JavaScript newbie to get a hold of the language and surrounding environment. 
+
+ 
+
+1) License: MIT (see LICENSE file)
+
+2) Usage: grasp(cssSelector [, context]) = [found nodes]
+	
+	where:
+	- context (optional) - node or array of nodes (NodeList counts too)
+
+3) Features: most of CSS 2.1 selectors + general sibling
+
+4) Compatibility: IE6+, rest of the world
