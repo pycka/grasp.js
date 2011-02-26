@@ -1,4 +1,4 @@
-TODO (rather soon than later):
+{[ TODO ]}
 
 - byId optimization for narrowing the domain of nodes to be traversed
 - employing querySelectorAll where possible
@@ -6,4 +6,6 @@ TODO (rather soon than later):
 - CSS 3 selectors
 - tidying up the code (it's ugly, i know)
 - performance improvements!!
-
+- error handling
+- api to test given node against selector or simple selector only
+- test suite

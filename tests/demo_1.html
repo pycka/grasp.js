@@ -189,7 +189,7 @@ href="http://www.w3.org/Style/css3-selectors-updates/translations">translation</
   <li>Generated Content / Markers
   <li>User Interface
 </ul>
-<div class=subtoc>
+<div class=subtoc id="searchedId">
 <h2><a name=contents>Table of contents</a></h2>
 <ul class=toc>
   <li class=tocline2><a href="#context">1.
@@ -2375,6 +2375,7 @@ End:
 <script>
 
 	var testSelectors = [
+		"div#searchedId li",
 		"div:first-child",
 		"divp[class='\"asdf\"'] .test[id|=dupa] [id~=id] [style*=margin] [size^=1] [width$=0]",
 		"[class~='name']",
@@ -2398,7 +2399,7 @@ End:
 		"html:first-child"
 	];
 
-	var testSelectorsToTest = testSelectors.length;
+	var testSelectorsToTest = 1; //testSelectors.length;
 	var iterations = 1;
 	var runGrasp = 1;
 	var runSizzle = 1;

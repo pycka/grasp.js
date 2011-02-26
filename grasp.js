@@ -229,9 +229,37 @@
 
 
 				/**
+				 * Checks whether one node is a descendant (child) of another
+				 * node.
+				 *
+				 * @param descendant node
+				 * @param ancestor	node
+				 * @return boolean success
+				 */
+				function nodeIsContainedBy(descendant, ancestor) {
+					if (ancestor.contains) {
+						return ancestor.contains(descendant);
+					}
+					else if (ancestor.compareDocumentPosition) {
+						return (ancestor.compareDocumentPosition(descendant) & 16);
+					}
+					else {
+						var node = descendant.parentNode;
+						while (node) {
+							if (node === ancestor) {
+								return true;
+							}
+							node = node.parentNode;
+						}
+					}
+
+					return false;
+				}
+
+
+				/**
 				 * Prefetch nodes for lookup. Here takes place optimization for
-				 * browsers supporting querySelectorAll method (for now, lowest
-				 * common denominator for queries is used - prolly IE 8).
+				 * browsers supporting querySelectorAll or getElementsByClassName.
 				 *
 				 * @param queryObjects
 				 * @param contextNode	root node for lookup
@@ -240,16 +268,33 @@
 				 */
 				function prefetch(queryObjects, contextNode) {
 					var result = {complete : false, nodes : []};
+					var firstSelector = queryObjects[1];
+					var id;
 					var features = queryObjects.last().features;
 
-					if (features.classes && browser.byClass) {
-						result.nodes = contextNode.getElementsByClassName(features.classes.join(' '));
+					// by id optimization / checks only first simple selector
+					if (firstSelector.features.id) {
+						id = firstSelector.features.id;
+						id = doc.getElementById(id);
+
+						if (nodeIsContainedBy(id, contextNode)) {
+							contextNode = id;
+						}
+						else {
+							contextNode = null;
+						}
 					}
-					else if (features.tag) {
-						result.nodes = contextNode.getElementsByTagName(features.tag);
-					}
-					else {
-						result.nodes = contextNode.getElementsByTagName('*');
+
+					if (contextNode) {
+						if (features.classes && browser.byClass) {
+							result.nodes = contextNode.getElementsByClassName(features.classes.join(' '));
+						}
+						else if (features.tag) {
+							result.nodes = contextNode.getElementsByTagName(features.tag);
+						}
+						else {
+							result.nodes = contextNode.getElementsByTagName('*');
+						}
 					}
 
 					return result;
