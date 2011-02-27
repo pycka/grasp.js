@@ -1,6 +1,5 @@
 {[ TODO ]}
 
-- byId optimization for narrowing the domain of nodes to be traversed
 - employing querySelectorAll where possible
 - API for extensions (new combinators and simple selectors)
 - CSS 3 selectors

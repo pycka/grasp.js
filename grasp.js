@@ -1,7 +1,7 @@
 /* 
  * Grasp 
  * 
- * -- Yet Another JavaScript CSS Selector Enigine --
+ * -- Yet Another JavaScript CSS Selector Engine --
  *
  *                                     by Radosław Pycka
  * 
@@ -15,6 +15,8 @@
 (function () {
 
 	grasp = (function () {
+		"use strict";
+
 
 		var doc = document;
 		var browser = {};
@@ -201,408 +203,441 @@
 		function find(cssQuery, context) {
 
 			/**
-			 * Perform reverse search (from leaves to root) in Grasp-0.1 style.
+			 * Merge one (src) arrays elements into another array (dst).
+			 * Unlike Array.prototype.concat this doesn't produce new array and
+			 * is considerably faster. Preserves order of elements in source
+			 * array.
 			 *
-			 * @param query
-			 * @param context
+			 * @param dst	destination array
+			 * @param src	source array from which to copy elements
+			 * @return number of elements copied
 			 */
-			function reverseSearch(query, context) {
-
-
-				/**
-				 * Merge one (src) arrays elements into another array (dst).
-				 * Unlike Array.prototype.concat this doesn't produce new array and
-				 * is considerably faster. Preserves order of elements in source
-				 * array.
-				 *
-				 * @param dst	destination array
-				 * @param src	source array from which to copy elements
-				 * @return number of elements copied
-				 */
-				function merge(dst, src) {
-					for (var i = 0, len = src.length; i < len; ++i) {
-						dst.push(src[i]);
-					}
-
-					return len;
+			function merge(dst, src) {
+				for (var i = 0, len = src.length; i < len; ++i) {
+					dst.push(src[i]);
 				}
 
+				return len;
+			}
 
-				/**
-				 * Checks whether one node is a descendant (child) of another
-				 * node.
-				 *
-				 * @param descendant node
-				 * @param ancestor	node
-				 * @return boolean success
-				 */
-				function nodeIsContainedBy(descendant, ancestor) {
-					if (ancestor.contains) {
-						return ancestor.contains(descendant);
+
+			/**
+			 * Find index of first element passing test function.
+			 *
+			 * @param array		to be tested
+			 * @param func		test function to be called on each element
+			 * @return integer index or -1 if not found
+			 */
+			function arrayIndexOf (array, func) {
+				for ( var i = 0, len = array.length ; i < len ; ++i ) {
+					if (func(array[i])) {
+						return i;
 					}
-					else if (ancestor.compareDocumentPosition) {
-						return (ancestor.compareDocumentPosition(descendant) & 16);
-					}
-					else {
-						var node = descendant.parentNode;
-						while (node) {
-							if (node === ancestor) {
-								return true;
-							}
-							node = node.parentNode;
+				}
+				return -1;
+			}
+
+
+			/**
+			 * Checks whether one node is a descendant (child) of another
+			 * node.
+			 *
+			 * @todo really-low-priority: check compareDocumentPosition performance
+			 *
+			 * @param descendant node
+			 * @param ancestor	node
+			 * @return boolean success
+			 */
+			function nodeIsContainedBy(descendant, ancestor) {
+				if (ancestor.contains) {
+					return ancestor.contains(descendant);
+				}
+				else if (ancestor.compareDocumentPosition) {
+					return (ancestor.compareDocumentPosition(descendant) & 16);
+				}
+				else {
+					var node = descendant.parentNode;
+					while (node) {
+						if (node === ancestor) {
+							return true;
 						}
+						node = node.parentNode;
 					}
-
-					return false;
 				}
 
+				return false;
+			}
 
-				/**
-				 * Prefetch nodes for lookup. Here takes place optimization for
-				 * browsers supporting querySelectorAll or getElementsByClassName.
-				 *
-				 * @param queryObjects
-				 * @param contextNode	root node for lookup
-				 *
-				 * @return result object, containing fetched nodes and other information
-				 */
-				function prefetch(queryObjects, contextNode) {
-					var result = {complete : false, nodes : []};
-					var firstSelector = queryObjects[1];
-					var id;
-					var features = queryObjects.last().features;
 
-					// by id optimization / checks only first simple selector
-					if (firstSelector.features.id) {
-						id = firstSelector.features.id;
-						id = doc.getElementById(id);
+			/**
+			 * Prefetch nodes for lookup. Here takes place optimization for
+			 * browsers supporting querySelectorAll or getElementsByClassName.
+			 *
+			 * @param queryObjects
+			 * @param contextNode	root node for lookup
+			 *
+			 * @return result object, containing fetched nodes and other information
+			 */
+			function prefetch(queryObjects, contextNode) {
+				var result = {complete : false, nodes : []};
+				var firstSelector = queryObjects[1];
+				var id;
+				var last = queryObjects.last();
+				var features = last.features;
 
-						if (nodeIsContainedBy(id, contextNode)) {
+				// by id optimization / checks only first simple selector
+				if (firstSelector.features.id) {
+					id = firstSelector.features.id;
+					id = doc.getElementById(id);
+
+					if (nodeIsContainedBy(id, contextNode)) {
+						var aidc = queryObjects[2].id;
+						if (aidc === COMBINATOR_DESCENDANT || aidc === COMBINATOR_CHILD) {
 							contextNode = id;
 						}
 						else {
-							contextNode = null;
+							contextNode = id.parentNode;
 						}
-					}
-
-					if (contextNode) {
-						if (features.classes && browser.byClass) {
-							result.nodes = contextNode.getElementsByClassName(features.classes.join(' '));
-						}
-						else if (features.tag) {
-							result.nodes = contextNode.getElementsByTagName(features.tag);
-						}
-						else {
-							result.nodes = contextNode.getElementsByTagName('*');
-						}
-					}
-
-					return result;
-				}
-
-
-				/**
-				 * Traverse DOM tree.
-				 *
-				 * @param query			query objects
-				 * @param prefetched	prefetched objects
-				 * @param rootNode		query context node
-				 * @return	array containig matched nodes
-				 */
-				function traverse(query, prefetched, rootNode) {
-
-					// CONSTANTS
-					var PREFETCHED = COMBINATOR_PREFETCHED;
-					var DESCENDANT = COMBINATOR_DESCENDANT;
-					var CHILD = COMBINATOR_CHILD;
-					var NEXT_SIBLING = COMBINATOR_NEXT_SIBLING;
-					var GENERAL_SIBLING = COMBINATOR_GENERAL_SIBLING;
-
-					var TAG = SELECTOR_TAG;
-					var ID = SELECTOR_ID;
-					var CLASS = SELECTOR_CLASS;
-					var ATTRIBUTE = SELECTOR_ATTRIBUTE;
-					var LANG = SELECTOR_LANG;
-					var FIRST_CHILD = SELECTOR_FIRST_CHILD;
-					
-
-					var result = [];
-					var tests;
-					var passed = false;
-
-					var stack = [];
-					var stackTop;
-					var sp;
-					var context;
-
-					var tref, node, firstNode;
-
-					// === BUILD STACK ===
-					
-					for (var i = 1, len = query.length - 2 ; i < len ; i+=2) {
-						tref = {
-							combinator	: query[i+1].id,
-							selector	: query[i],
-							currentNode	: null,
-							lastPassed	: null,
-							lastFailed	: null
-						};
-
-						stack.push(tref);
-					}
-					
-					stack.push({
-						combinator	: 11,
-						selector	: query[query.length-1],
-						currentNode : null
-					});
-
-					sp = stack.length - 1;
-					stackTop = sp;
-
-					// main processing loop
-
-					var plen = prefetched.length;
-					var iterator = -1;
-
-					GRASP_LOOP:
-					while (true) {
-
-						// ==== FETCH ====
-						
-						context = stack[sp];
-						
-						switch (context.combinator) {
-
-							// iterate prefetched nodes
-							case PREFETCHED:
-								node = prefetched[++iterator];
-								if (iterator === plen) {
-									break GRASP_LOOP;
-								}
-								stack[sp].currentNode = node;
-								break;
-
-
-							// walk through ancestors (descendants combinator)
-							case DESCENDANT:
-								if (!context.currentNode) {
-									context.currentNode = stack[sp+1].currentNode;
-								}
-								node = context.currentNode.parentNode;
-								stack[sp].currentNode = node;
-								if (node === context.lastFailed || node === rootNode) {
-									stack[sp].lastFailed = stack[sp+1].currentNode.parentNode;
-									stack[sp].currentNode = null;
-
-									++sp;
-									continue GRASP_LOOP;
-								}
-								break;
-
-
-							// check parent node only (child nodes combinator)
-							case CHILD:
-								node = false;
-
-								if (!context.currentNode) {
-									node = stack[sp+1].currentNode.parentNode;
-								}
-
-								if (context.currentNode || node === rootNode || node === context.lastFailed) {
-									stack[sp].lastFailed = context.currentNode;
-									stack[sp].currentNode = null;
-
-									++sp;
-									continue GRASP_LOOP;
-								}
-								else {
-									stack[sp].currentNode = node;
-								}		
-								break;
-
-
-							// check previous sibling (next sibling combinator)
-							case NEXT_SIBLING:
-								node = false;
-								if (!context.currentNode) {
-									node = stack[sp+1].currentNode.previousSibling;
-									while (node && node.nodeType !== 1) {
-										node = node.previousSibling;
-									}
-								}
-
-								if (node === null || context.currentNode || node === context.lastFailed) {
-									stack[sp].lastFailed = context.currentNode;
-									stack[sp].currentNode = null;
-
-									++sp;
-									continue GRASP_LOOP;
-								}
-								else {
-									stack[sp].currentNode = node;
-								}
-								break;
-
-
-							// check all previous siblings (general sibling combinator)
-							case GENERAL_SIBLING:
-								node = false;
-								if (!context.currentNode) {
-									node = stack[sp+1].currentNode.previousSibling;
-									while (node && node.nodeType !== 1) {
-										node = node.previousSibling;
-									}
-									firstNode = node;
-								}
-
-								if (node === null || context.currentNode || node === context.lastFailed) {
-									stack[sp].lastFailed = firstNode;
-									stack[sp].currentNode = null;
-
-									++sp;
-									continue GRASP_LOOP;
-								}
-								else {
-									stack[sp].currentNode = node;
-								}
-								break;
-						} 
-
-						passed = false;
-						
-						// ==== CHECK CACHE ====
-						if (node === context.lastPassed) {
-							passed = true;
-						}
-
-						// ==== TESTS ====
-						if (!passed) {
-							passed = true;
-							tests = stack[sp].selector.tests;
-
-							for (var i = 0, len = tests.length ; passed && i < len ; ++i) {
-								tref = tests[i];
-								switch(tref[0]) {
-									// tag name
-									case TAG:
-										passed = (node.nodeName === tref[1]);
-										break;
-										
-									// id
-									case ID:
-										passed = (node.id === tref[1]);
-										break;
-
-									// classes:
-									case CLASS:
-										var className = node.className.replace(/\s+/, ' ') + ' ';
-										var classes = tref[1];
-										var classCount = classes.length;
-										var ci, matched = 0;
-
-										for (ci = 0; ci < classCount; ++ci) {
-											className.indexOf((classes[ci] + ' ')) !== -1 && matched++;
-										}
-										passed = (classCount === matched);
-										break;
-
-									// :first-child:
-									case FIRST_CHILD:
-										passed = (node !== doc.documentElement);
-										var previousSibling = node.previousSibling;
-										while (passed && previousSibling) {
-											if (previousSibling.nodeType === 1) {
-												passed = false;
-											}
-											previousSibling = previousSibling.previousSibling;
-										}
-										
-										break;
-
-									// attributes:
-									case ATTRIBUTE:
-										var attribute;
-										var attributes = tref[1];
-										var attrName;
-										var attrRealValue, attrExpectedValue
-										var op, value;
-										var wsRegexp = /\s/;
-
-										for (var ai = 0, iters = attributes.length ; ai < iters ; ++ai) {
-
-											attribute = attributes[ai];
-											attrName = attribute[0];
-											op = attribute[1];
-											attrExpectedValue = attribute[2];
-											attrName === 'class' && (attrName = 'className');
-
-											(attrRealValue = node[attrName]) || (attrRealValue = node.getAttribute(attrName));
-
-											passed = !!attrRealValue;
-											if (op === 0) {
-												// do nothing :)
-											}
-											else if(op === 1) {
-												passed = attrExpectedValue === attrRealValue;
-											}
-											else if (op === 2) {
-												passed = attrExpectedValue.test(attrRealValue);
-											}
-											else if (op === 3 || op === 5) {
-												passed = attrExpectedValue.test(attrRealValue);
-											}
-											else if (op === 4) {
-												passed = attrRealValue.indexOf(attrExpectedValue) !== -1;
-											}
-										}
-										break;
-
-									// language
-									case LANG:
-										var nodeLang = node.lang || node.getAttribute('lang');
-										passed = (nodeLang && nodeLang.toLowerCase() === tref[1]);
-										break;
-								}
-							}
-						}
-
-						// ==== SAVE ====
-						if (passed) {
-
-							if (sp) {
-								--sp;
-							}
-							else {
-								result.push(stack[stackTop].currentNode);
-
-								for (var j = sp; j < stackTop ; ++j) {
-									stack[j].lastPassed = stack[j].currentNode;
-									stack[j].currentNode = null;
-								}
-
-								sp = stackTop;
-							}
-						}
-					} 
-
-					return result;
-				}
-
-
-
-				// begin reverseSearch:
-
-				
-				var result = [];
-
-				for (var i = 0, len = context.length ; i < len ; ++i) {
-					var temp = traverse(query, prefetch(query, context[i]).nodes, context[i]);
-					if (!i) {
-						result = temp;
 					}
 					else {
-						merge(result, temp);
+						contextNode = null;
+					}
+				}
+
+				if (contextNode) {
+					if (features.classes && browser.byClass) {
+						result.nodes = contextNode.getElementsByClassName(features.classes.join(' '));
+					}
+					else if (features.tag) {
+						result.nodes = contextNode.getElementsByTagName(features.tag);
+						delete features.tag;
+						last.tests.splice(arrayIndexOf(last.tests, function (el) {
+							return el[0] === SELECTOR_TAG;
+						}), 1);
+					}
+					else {
+						result.nodes = contextNode.getElementsByTagName('*');
+					}
+				}
+
+				return result;
+			}
+
+
+			/**
+			 * Traverse DOM tree.
+			 *
+			 * @param query			query objects
+			 * @param prefetched	prefetched objects
+			 * @param rootNode		query context node
+			 * @return	array containig matched nodes
+			 */
+			function traverse(query, prefetched, rootNode) {
+
+				// CONSTANTS
+				var PREFETCHED = COMBINATOR_PREFETCHED;
+				var DESCENDANT = COMBINATOR_DESCENDANT;
+				var CHILD = COMBINATOR_CHILD;
+				var NEXT_SIBLING = COMBINATOR_NEXT_SIBLING;
+				var GENERAL_SIBLING = COMBINATOR_GENERAL_SIBLING;
+
+				var TAG = SELECTOR_TAG;
+				var ID = SELECTOR_ID;
+				var CLASS = SELECTOR_CLASS;
+				var ATTRIBUTE = SELECTOR_ATTRIBUTE;
+				var LANG = SELECTOR_LANG;
+				var FIRST_CHILD = SELECTOR_FIRST_CHILD;
+
+				// LOCAL VARIABLES
+
+				var result = [];
+				var tests;
+				var passed = false;
+
+				var stack = [];
+				var stackTop;
+				var sp;
+				var context;
+				var cacheHit;
+
+				var tref, node, firstNode;
+
+				// === BUILD STACK ===
+
+				for (var i = 1, len = query.length - 2 ; i < len ; i+=2) {
+					tref = {
+						combinator	: query[i+1].id,
+						selector	: query[i],
+						currentNode	: null,
+						lastPassed	: null,
+						lastFailed	: null,
+						forPassed	: null
+					};
+
+					stack.push(tref);
+				}
+
+				stack.push({
+					combinator	: 11,
+					selector	: query[query.length-1],
+					currentNode : null
+				});
+
+				sp = stack.length - 1;
+				stackTop = sp;
+
+
+				// main processing loop
+
+				var plen = prefetched.length;
+				var iterator = -1;
+//				window.status = 'prefetched = ' + prefetched.length;
+
+				GRASP_LOOP:
+				while (true) {
+
+					// ==== FETCH ====
+
+					context = stack[sp];
+
+					switch (context.combinator) {
+
+						// iterate prefetched nodes
+						case PREFETCHED:
+
+							node = prefetched[++iterator];
+							if (iterator === plen) {
+								break GRASP_LOOP;
+							}
+							stack[sp].currentNode = node;
+							break;
+
+
+						// walk through ancestors (descendants combinator)
+						case DESCENDANT:
+							
+							if (!context.currentNode) {
+								node = stack[sp+1].currentNode.parentNode;
+								stack[sp].forPassed = node;
+							} else {
+								node = context.currentNode.parentNode;
+							}
+							if (node === context.lastFailed || node === rootNode) {
+								stack[sp].lastFailed = stack[sp].forPassed;
+								stack[sp].currentNode = null;
+								++sp;
+								continue GRASP_LOOP;
+							}
+							stack[sp].currentNode = node;
+							break;
+
+
+						// check parent node only (child nodes combinator)
+						case CHILD:
+							
+							if (!context.currentNode) {
+								node = stack[sp+1].currentNode.parentNode;
+								stack[sp].forPassed = node;
+								stack[sp].currentNode = node;
+								passed = true;
+							}
+							else {
+								passed = false;
+							}
+
+							if (!passed || node === rootNode || node === context.lastFailed) {
+								stack[sp].lastFailed = context.currentNode;
+								stack[sp].currentNode = null;
+								++sp;
+								continue GRASP_LOOP;
+							}
+							else {
+								stack[sp].currentNode = node;
+							}
+							break;
+
+
+						// check previous sibling (next sibling combinator)
+						case NEXT_SIBLING:
+							
+							if (!context.currentNode) {
+								node = stack[sp+1].currentNode;
+								stack[sp].forPassed = node;
+								while ((node = node.previousSibling)) {
+									if (node.nodeType === 1) {
+										break;
+									}
+								}
+								passed = true;
+							}
+							else {
+								passed = false;
+							}
+							if (!passed || !node || node === context.forPassed) {
+								stack[sp].lastFailed = stack[sp].forPassed;
+								stack[sp].currentNode = null;
+								++sp;
+								continue GRASP_LOOP;
+							}
+							else {
+								stack[sp].currentNode = node;
+								stack[sp].forPassed = null;
+							}
+							break;
+
+
+						// check all previous siblings (general sibling combinator)
+						case GENERAL_SIBLING:
+							
+							if (!context.currentNode) {
+								node = stack[sp+1].currentNode;
+								stack[sp].forPassed = node;
+								while ((node = node.previousSibling)) {
+									if (node.nodeType === 1) {
+										break;
+									}
+								}
+							}
+							else {
+								node = context.currentNode;
+								while ((node = node.previousSibling)) {
+									if (node.nodeType === 1) {
+										break;
+									}
+								}
+							}
+							if (!node || node === context.forPassed) {
+								stack[sp].lastFailed = stack[sp].forPassed;
+								stack[sp].currentNode = null;
+								++sp;
+								continue GRASP_LOOP;
+							}
+							else {
+								stack[sp].currentNode = node;
+							}
+							break;
+					}
+
+					passed = false;
+					cacheHit = false;
+
+					// ==== CHECK CACHE ====
+					if (node === context.lastPassed) {
+						passed = true;
+						cacheHit = true;
+ 					}
+
+//					alert(node.nodeName + ' cacheHit = ' + cacheHit);
+
+					// ==== TESTS ====
+					if (!passed) {
+
+						passed = true;
+						tests = stack[sp].selector.tests;
+
+						for (var i = 0, len = tests.length ; passed && i < len ; ++i) {
+							tref = tests[i];
+							switch(tref[0]) {
+								// tag name
+								case TAG:
+									passed = (node.nodeName === tref[1]);
+									break;
+
+								// id
+								case ID:
+									passed = (node.id === tref[1]);
+									break;
+
+								// classes:
+								case CLASS:
+									var className = node.className.replace(/\s+/, ' ') + ' ';
+									var classes = tref[1];
+									var classCount = classes.length;
+									var ci, matched = 0;
+
+									for (ci = 0; ci < classCount; ++ci) {
+										className.indexOf((classes[ci] + ' ')) !== -1 && matched++;
+									}
+									passed = (classCount === matched);
+									break;
+
+								// :first-child:
+								case FIRST_CHILD:
+									passed = (node !== doc.documentElement);
+									var previousSibling = node.previousSibling;
+									while (passed && previousSibling) {
+										if (previousSibling.nodeType === 1) {
+											passed = false;
+										}
+										previousSibling = previousSibling.previousSibling;
+									}
+
+									break;
+
+								// attributes:
+								case ATTRIBUTE:
+									var attribute;
+									var attributes = tref[1];
+									var attrName;
+									var attrRealValue, attrExpectedValue
+									var op, value;
+									var wsRegexp = /\s/;
+
+									for (var ai = 0, iters = attributes.length ; ai < iters ; ++ai) {
+
+										attribute = attributes[ai];
+										attrName = attribute[0];
+										op = attribute[1];
+										attrExpectedValue = attribute[2];
+										attrName === 'class' && (attrName = 'className');
+
+										(attrRealValue = node[attrName]) || (attrRealValue = node.getAttribute(attrName));
+
+										passed = !!attrRealValue;
+										if (op === 0) {
+											// do nothing :)
+										}
+										else if(op === 1) {
+											passed = attrExpectedValue === attrRealValue;
+										}
+										else if (op === 2) {
+											passed = attrExpectedValue.test(attrRealValue);
+										}
+										else if (op === 3 || op === 5) {
+											passed = attrExpectedValue.test(attrRealValue);
+										}
+										else if (op === 4) {
+											passed = attrRealValue.indexOf(attrExpectedValue) !== -1;
+										}
+									}
+									break;
+
+								// language
+								case LANG:
+									var nodeLang = node.lang || node.getAttribute('lang');
+									passed = (nodeLang && nodeLang.toLowerCase() === tref[1]);
+									break;
+							}
+						}
+
+					}
+
+					// ==== SAVE ====
+					if (passed) {
+
+						if (sp && !cacheHit) {
+							--sp;
+						}
+						else {
+							result.push(stack[stackTop].currentNode);
+
+							for (var j = sp; j < stackTop ; ++j) {
+								stack[j].lastPassed = stack[j].forPassed;
+								stack[j].currentNode = null;
+							}
+
+							sp = stackTop;
+						}
 					}
 				}
 
@@ -612,9 +647,20 @@
 
 
 			// begin find():
-			
-			var queryObjects = parseQuery(cssQuery);
-			var result = reverseSearch(queryObjects, context);
+
+			var query = parseQuery(cssQuery);
+			var result = [];
+
+			for (var i = 0, len = context.length ; i < len ; ++i) {
+				var prefetched = prefetch(query, context[i]).nodes;
+				var temp = traverse(query, prefetched, context[i]);
+				if (!i) {
+					result = temp;
+				}
+				else {
+					merge(result, temp);
+				}
+			}
 
 			return result;
 		}
@@ -872,13 +918,15 @@
 		// ===== [ PUBLIC API ] =====
 
 
-		return function (selector, context) {
+		function Grasp(selector, context) {
 
 			!context && (context = [doc]);
 			typeof context.length === 'undefined' && (context = [context])
 
 			return find(selector, context);
 		}
+
+		return Grasp;
 	})();
 	
 })();
